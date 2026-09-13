@@ -1,0 +1,12 @@
+{
+    "profile": {
+        "name": "",
+        "age": "",
+        "weight": "",
+        "goal_ml": 2000
+    },
+    "consumed_ml": 0,
+    "records": [],
+    "date": "2026-09-13",
+    "reminder_interval_min": 60
+}
