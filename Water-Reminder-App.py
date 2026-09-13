@@ -1,27 +1,27 @@
 """
 ====================================================================
- PROJECT NAME : Water Reminder Web App
+ PROJECT NAME : Water Reminder Web App (with Live Timer & Alerts)
  FRAMEWORK    : Streamlit (Cloud/Browser Ready)
  SUBJECT      : Data Structures and Algorithms (DSA) - College Assignment
 
  MAIN DATA STRUCTURES USED
    1. LIST / DYNAMIC ARRAY  -> st.session_state.records
-      Stores every water-intake entry (time + amount).
    2. STACK (LIFO)          -> st.session_state.undo_stack
-      Used with append() and pop() to undo the last entry.
    3. QUEUE (FIFO)          -> st.session_state.reminder_log (deque)
-      Stores notification history up to maxlen entries.
 
  MAIN ALGORITHMS
    - Linear Search (search_records)
    - Aggregation / Arithmetic metrics (Total, Remaining, Glasses)
+   - Real-time countdown delta calculation
 ====================================================================
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime
 from collections import deque
 import pandas as pd
+import time
 
 # ---------------------------------------------------------------
 # CONSTANTS & SETUP
@@ -36,7 +36,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------
-# STATE INITIALISATION (DSA Structures in Session Memory)
+# STATE INITIALISATION
 # ---------------------------------------------------------------
 if "records" not in st.session_state:
     st.session_state.records = []  # LIST / DYNAMIC ARRAY
@@ -50,8 +50,17 @@ if "reminder_log" not in st.session_state:
 if "profile" not in st.session_state:
     st.session_state.profile = {"name": "Guest", "age": 20, "weight": 60, "goal_ml": 2000}
 
-if "last_reminder_time" not in st.session_state:
-    st.session_state.last_reminder_time = datetime.now()
+if "timer_interval_min" not in st.session_state:
+    st.session_state.timer_interval_min = 60
+
+if "timer_running" not in st.session_state:
+    st.session_state.timer_running = False
+
+if "timer_target_epoch" not in st.session_state:
+    st.session_state.timer_target_epoch = 0
+
+if "show_notification" not in st.session_state:
+    st.session_state.show_notification = False
 
 
 # ---------------------------------------------------------------
@@ -103,13 +112,35 @@ def undo_intake():
 def trigger_reminder():
     """Enqueue event into FIFO Queue."""
     now_str = datetime.now().strftime("%I:%M:%S %p")
-    st.session_state.reminder_log.append(f"💧 Drink water check at {now_str}")
+    st.session_state.reminder_log.append(f"💧 Reminder triggered at {now_str}")
+    st.session_state.show_notification = True
 
 
 # ---------------------------------------------------------------
 # USER INTERFACE
 # ---------------------------------------------------------------
 st.title("💧 Water Reminder App")
+
+# Play Alert Sound & Notification Banner when timer expires
+if st.session_state.show_notification:
+    st.error("🚨 💧 **TIME TO DRINK WATER! Take a sip now.**", icon="🔔")
+    # Web audio beep sound using HTML5 audio
+    components.html("""
+    <script>
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      function beep() {
+        var osc = ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      }
+      beep();
+      setTimeout(beep, 600);
+    </script>
+    """, height=0)
+
 user_name = st.session_state.profile.get("name", "Guest")
 goal = st.session_state.profile.get("goal_ml", 2000)
 consumed = calculate_total()
@@ -120,8 +151,8 @@ pct = min(100.0, round((consumed / goal) * 100, 1)) if goal > 0 else 0.0
 st.caption(f"Welcome, **{user_name}** | Daily Target: **{goal} ml**")
 
 # Top Navigation Tabs
-tab_dash, tab_add, tab_history, tab_reminder, tab_settings = st.tabs([
-    "🏠 Dashboard", "💧 Add Water", "📊 History & Search", "⏰ Reminder Log", "⚙️ Settings"
+tab_dash, tab_add, tab_timer, tab_history, tab_settings = st.tabs([
+    "🏠 Dashboard", "💧 Add Water", "⏰ Reminder & Timer", "📊 History & Search", "⚙️ Settings"
 ])
 
 # 1. DASHBOARD
@@ -170,7 +201,82 @@ with tab_add:
         add_water(custom_ml)
         st.rerun()
 
-# 3. HISTORY (LINEAR SEARCH & DYNAMIC ARRAY)
+# 3. REMINDER & TIMER (LIVE COUNTDOWN & FIFO QUEUE)
+with tab_timer:
+    st.subheader("⏰ Live Reminder Timer")
+    
+    col_t1, col_t2 = st.columns([2, 1])
+    with col_t1:
+        preset_cols = st.columns(4)
+        if preset_cols[0].button("30 min"):
+            st.session_state.timer_interval_min = 30
+            st.session_state.timer_target_epoch = time.time() + (30 * 60)
+            st.session_state.timer_running = True
+            st.rerun()
+        if preset_cols[1].button("45 min"):
+            st.session_state.timer_interval_min = 45
+            st.session_state.timer_target_epoch = time.time() + (45 * 60)
+            st.session_state.timer_running = True
+            st.rerun()
+        if preset_cols[2].button("60 min"):
+            st.session_state.timer_interval_min = 60
+            st.session_state.timer_target_epoch = time.time() + (60 * 60)
+            st.session_state.timer_running = True
+            st.rerun()
+        if preset_cols[3].button("90 min"):
+            st.session_state.timer_interval_min = 90
+            st.session_state.timer_target_epoch = time.time() + (90 * 60)
+            st.session_state.timer_running = True
+            st.rerun()
+
+    custom_timer = st.number_input("Custom Interval (Minutes):", min_value=1, max_value=300, value=int(st.session_state.timer_interval_min))
+
+    # Countdown calculation
+    remaining_secs = 0
+    if st.session_state.timer_running:
+        remaining_secs = int(st.session_state.timer_target_epoch - time.time())
+        if remaining_secs <= 0:
+            trigger_reminder()
+            st.session_state.timer_target_epoch = time.time() + (st.session_state.timer_interval_min * 60)
+            remaining_secs = st.session_state.timer_interval_min * 60
+
+    mins, secs = divmod(max(0, remaining_secs), 60)
+    timer_display = f"{mins:02d}:{secs:02d}" if st.session_state.timer_running else f"{custom_timer:02d}:00"
+
+    st.markdown(f"## ⏳ Next reminder in: **{timer_display}**")
+    status_text = "Running ▶️" if st.session_state.timer_running else "Stopped ⏹"
+    st.write(f"Status: **{status_text}** (Interval: {st.session_state.timer_interval_min} mins)")
+
+    b1, b2, b3 = st.columns(3)
+    if b1.button("▶️ Start Timer", use_container_width=True):
+        st.session_state.timer_interval_min = custom_timer
+        st.session_state.timer_target_epoch = time.time() + (custom_timer * 60)
+        st.session_state.timer_running = True
+        st.session_state.show_notification = False
+        st.rerun()
+
+    if b2.button("⏸ Pause Timer", use_container_width=True):
+        st.session_state.timer_running = False
+        st.rerun()
+
+    if b3.button("⏹ Reset Timer", use_container_width=True):
+        st.session_state.timer_running = False
+        st.session_state.show_notification = False
+        st.rerun()
+
+    st.divider()
+    st.subheader("🔔 Recent Reminder Log (FIFO Queue - Last 15 events)")
+    if st.button("🔔 Test Notification & Enqueue"):
+        trigger_reminder()
+        st.rerun()
+
+    if st.session_state.reminder_log:
+        for item in reversed(st.session_state.reminder_log):
+            st.write(f"- {item}")
+    else:
+        st.info("No reminder events in the queue yet.")
+
+# 4. HISTORY (LINEAR SEARCH & DYNAMIC ARRAY)
 with tab_history:
     st.subheader("Intake History (Dynamic Array)")
     query = st.text_input("🔍 Search history (by ml or AM/PM):", placeholder="e.g. 250 or PM")
@@ -182,19 +288,6 @@ with tab_history:
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info("No records match your search.")
-
-# 4. REMINDER LOG (FIFO QUEUE)
-with tab_reminder:
-    st.subheader("Reminder Queue (FIFO - Last 15 events)")
-    if st.button("🔔 Trigger Manual Reminder", type="primary"):
-        trigger_reminder()
-        st.rerun()
-
-    if st.session_state.reminder_log:
-        for item in reversed(st.session_state.reminder_log):
-            st.write(f"- {item}")
-    else:
-        st.info("No reminder events in the queue yet.")
 
 # 5. SETTINGS
 with tab_settings:
@@ -212,5 +305,3 @@ with tab_settings:
         st.session_state.profile = {"name": name, "age": age, "weight": weight, "goal_ml": goal_input}
         st.success("Profile saved!")
         st.rerun()
-       
-      
